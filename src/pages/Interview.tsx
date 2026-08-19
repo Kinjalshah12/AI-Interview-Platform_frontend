@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { interviewApi, ApiError } from '../lib/api'
 import type { Question } from '../lib/api'
 import Pill from '../components/Pill'
@@ -14,7 +14,10 @@ function formatTime(s: number) {
 export default function Interview() {
   const navigate = useNavigate()
   const location = useLocation()
-  const sessionId = (location.state as { sessionId?: number })?.sessionId
+  const { id } = useParams<{ id: string }>()
+  const sessionId = id
+    ? Number(id)
+    : (location.state as { sessionId?: number })?.sessionId
 
   const [questions,   setQuestions]   = useState<Question[]>([])
   const [currentIdx,  setCurrentIdx]  = useState(0)
@@ -76,7 +79,7 @@ export default function Interview() {
         setAnswer('')
       } else {
         // All done → go to results
-        navigate('/results', { state: { sessionId } })
+        navigate('/results', { state: { sessionId: sessionId! } })
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not submit answer.')

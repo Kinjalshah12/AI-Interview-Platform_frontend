@@ -23,20 +23,24 @@ const EXPERIENCE_LEVELS: { label: string; value: string }[] = [
   { label: 'Lead (6+ yrs)',    value: 'lead' },
 ]
 
+type GeneratePhase = 'idle' | 'creating' | 'generating' | 'success'
+
 export default function CreateSession() {
   const navigate = useNavigate()
 
-  const [activeMode,     setActiveMode]     = useState(0)
-  const [role,           setRole]           = useState('Python Backend Developer')
-  const [skills,         setSkills]         = useState(['Python', 'Django', 'PostgreSQL'])
-  const [newSkill,       setNewSkill]       = useState('')
-  const [addingSkill,    setAddingSkill]    = useState(false)
-  const [difficulty,     setDifficulty]     = useState('medium')
+  const [activeMode,      setActiveMode]      = useState(0)
+  const [role,            setRole]            = useState('Python Backend Developer')
+  const [skills,          setSkills]          = useState(['Python', 'Django', 'PostgreSQL'])
+  const [newSkill,        setNewSkill]        = useState('')
+  const [addingSkill,     setAddingSkill]     = useState(false)
+  const [difficulty,      setDifficulty]      = useState('medium')
   const [experienceLevel, setExperienceLevel] = useState('mid')
-  const [questionCount,  setQuestionCount]  = useState(10)
-  const [notes,          setNotes]          = useState('')
-  const [loading,        setLoading]        = useState(false)
-  const [error,          setError]          = useState('')
+  const [questionCount,   setQuestionCount]   = useState(5)
+  const [notes,           setNotes]           = useState('')
+  const [phase,           setPhase]           = useState<GeneratePhase>('idle')
+  const [error,           setError]           = useState('')
+
+  const isBusy = phase !== 'idle'
 
   const removeSkill = (s: string) => setSkills(prev => prev.filter(x => x !== s))
   const addSkill = () => {
@@ -49,19 +53,25 @@ export default function CreateSession() {
     if (!role.trim()) { setError('Please enter a role.'); return }
     if (skills.length === 0) { setError('Add at least one skill.'); return }
     setError('')
-    setLoading(true)
+
     try {
+      setPhase('creating')
       const session = await interviewApi.create({
         role: role.trim(),
         experience_level: experienceLevel,
         difficulty,
         skills,
+        ...(notes.trim() ? { notes: notes.trim() } : {}),
       })
-      navigate('/interview', { state: { sessionId: session.id } })
+
+      setPhase('generating')
+      await interviewApi.generateQuestions(session.id, questionCount)
+
+      setPhase('success')
+      setTimeout(() => navigate(`/interviews/${session.id}`), 900)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not create session.')
-    } finally {
-      setLoading(false)
+      setPhase('idle')
+      setError(err instanceof ApiError ? err.message : 'Could not generate interview questions.')
     }
   }
 
@@ -77,7 +87,81 @@ export default function CreateSession() {
   const expLabel        = EXPERIENCE_LEVELS.find(e => e.value === experienceLevel)?.label ?? experienceLevel
 
   return (
-    <div className="screen-enter" style={{ maxWidth: 1180, margin: '0 auto', padding: '44px 40px 0' }}>
+    <div className="screen-enter" style={{ maxWidth: 1180, margin: '0 auto', padding: '44px 40px 0', position: 'relative' }}>
+
+      {/* Generating overlay */}
+      {isBusy && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 100,
+          background: 'rgba(242,244,239,0.92)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div className="ticket" style={{
+            maxWidth: 440, width: '100%', padding: '40px 36px', textAlign: 'center',
+          }}>
+            {phase === 'success' ? (
+              <>
+                <div style={{
+                  width: 56, height: 56, borderRadius: '50%',
+                  background: 'var(--sage-tint)', color: 'var(--sage)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 26, margin: '0 auto 20px',
+                }}>✓</div>
+                <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, marginBottom: 8 }}>
+                  Questions generated successfully!
+                </h2>
+                <p style={{ color: 'var(--ink-soft)', fontSize: 14 }}>
+                  Taking you to your interview…
+                </p>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 32, marginBottom: 16 }}>✨</div>
+                <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, marginBottom: 10 }}>
+                  {phase === 'creating'
+                    ? 'Creating your session…'
+                    : 'Creating your personalized interview…'}
+                </h2>
+                {phase === 'generating' && (
+                  <>
+                    <p style={{ color: 'var(--ink-soft)', fontSize: 14, marginBottom: 14 }}>
+                      Generating questions based on:
+                    </p>
+                    <div style={{
+                      display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center',
+                      marginBottom: 20,
+                    }}>
+                      {skills.map(s => (
+                        <span key={s} style={{
+                          padding: '6px 12px', borderRadius: 99,
+                          background: 'var(--paper-alt)', border: '1px solid var(--line)',
+                          fontSize: 12.5, fontWeight: 500,
+                        }}>{s}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <p style={{
+                  color: 'var(--ink-faint)', fontSize: 13,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                }}>
+                  {phase === 'creating'
+                    ? 'Setting up your interview session…'
+                    : 'This may take a few seconds.'}
+                </p>
+                <div className="progress-track" style={{ width: '100%', marginTop: 24 }}>
+                  <div className="progress-fill" style={{
+                    width: phase === 'creating' ? '35%' : '75%',
+                    transition: 'width 1.2s ease',
+                  }} />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{ marginBottom: 28 }}>
         <Eyebrow>Step 1 of 1</Eyebrow>
@@ -94,11 +178,12 @@ export default function CreateSession() {
         {MODES.map((m, i) => {
           const active = activeMode === i
           return (
-            <div key={m.num} onClick={() => setActiveMode(i)} style={{
+            <div key={m.num} onClick={() => !isBusy && setActiveMode(i)} style={{
               flex: 1, padding: '16px 18px', borderRadius: 12,
               border: `1.5px solid ${active ? 'var(--ink)' : 'var(--line)'}`,
               background: active ? 'var(--ink)' : 'var(--card)',
-              cursor: 'pointer', transition: 'all .15s ease',
+              cursor: isBusy ? 'default' : 'pointer', transition: 'all .15s ease',
+              opacity: isBusy ? 0.6 : 1,
             }}>
               <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: active ? 'var(--brass)' : 'var(--brass-dark)', marginBottom: 6 }}>{m.num}</div>
               <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 15, marginBottom: 3, color: active ? 'var(--paper)' : 'var(--ink)' }}>{m.title}</div>
@@ -117,7 +202,7 @@ export default function CreateSession() {
       <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 26, alignItems: 'start' }}>
 
         {/* Form */}
-        <div className="ticket" style={{ padding: 30 }}>
+        <div className="ticket" style={{ padding: 30, opacity: isBusy ? 0.5 : 1, pointerEvents: isBusy ? 'none' : 'auto' }}>
 
           {/* Role */}
           <div style={{ marginBottom: 22 }}>
@@ -221,8 +306,8 @@ export default function CreateSession() {
               </div>
             ))}
             <div className="ticket-perf" style={{ marginBottom: 22 }} />
-            <Btn style={{ width: '100%', justifyContent: 'center' }} onClick={handleGenerate} disabled={loading}>
-              {loading ? 'Creating…' : 'Generate Interview →'}
+            <Btn style={{ width: '100%', justifyContent: 'center' }} onClick={handleGenerate} disabled={isBusy}>
+              {isBusy ? 'Generating…' : 'Generate Interview Questions'}
             </Btn>
           </div>
         </div>

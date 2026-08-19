@@ -15,6 +15,55 @@
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
+// ── Standard API envelope ────────────────────────────────────────────────────
+export type ApiEnvelope<T = unknown> = {
+  success: boolean
+  status: number
+  message: string
+  data: T
+}
+
+/** Extract an array from envelope data (plain array or paginated/named wrapper). */
+function asList<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data
+  if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>
+    for (const key of ['results', 'sessions', 'interviews', 'questions', 'items']) {
+      if (Array.isArray(obj[key])) return obj[key] as T[]
+    }
+  }
+  return []
+}
+
+/** Extract a single object from envelope data (direct or nested under a key). */
+function asObject<T>(data: unknown, keys: string[] = []): T {
+  if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>
+    for (const key of keys) {
+      if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+        return obj[key] as T
+      }
+    }
+  }
+  return data as T
+}
+
+function normalizeAuthResponse(data: unknown): AuthResponse {
+  const d = (data ?? {}) as Record<string, unknown>
+  const user = (d.user ?? d) as User
+  const tokensObj = (d.tokens ?? d) as Record<string, unknown>
+  const access  = (tokensObj.access  ?? d.access)  as string | undefined
+  const refresh = (tokensObj.refresh ?? d.refresh) as string | undefined
+  if (!user?.email || !access || !refresh) {
+    throw new ApiError(500, 'Invalid authentication response from server.')
+  }
+  return { user, tokens: { access, refresh } }
+}
+
+function normalizeUser(data: unknown): User {
+  return asObject<User>(data, ['user'])
+}
+
 // ── Demo credentials bypass ──────────────────────────────────────────────────
 // Temporary: allows login without a running backend.
 // Remove once the real DB is set up.
@@ -78,7 +127,11 @@ async function request<T>(
       throw new ApiError(401, 'Session expired. Please log in again.')
     }
 
-    const { access: newAccess, refresh: newRefresh } = await refreshRes.json()
+    const refreshJson = await refreshRes.json()
+    const refreshData = (refreshJson?.data ?? refreshJson) as Record<string, unknown>
+    const tokensObj   = (refreshData.tokens ?? refreshData) as Record<string, unknown>
+    const newAccess: string  = (tokensObj.access  ?? refreshData.access)  as string
+    const newRefresh: string = (tokensObj.refresh ?? refreshData.refresh) as string
     tokens.setAccess(newAccess)
     if (newRefresh) tokens.setRefresh(newRefresh)
 
@@ -91,7 +144,9 @@ async function request<T>(
     let detail = `HTTP ${res.status}`
     try {
       const json = await res.json()
-      detail = json?.detail
+      // Support both envelope format { message } and legacy field formats
+      detail = json?.message
+        ?? json?.detail
         ?? json?.non_field_errors?.[0]
         ?? Object.values(json)?.[0]
         ?? detail
@@ -101,7 +156,13 @@ async function request<T>(
   }
 
   if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
+
+  // Unwrap the standard API envelope: { success, status, message, data }
+  const envelope = await res.json()
+  if (envelope?.success === false) {
+    throw new ApiError(envelope.status ?? res.status, envelope.message ?? 'Request failed')
+  }
+  return (envelope?.data !== undefined ? envelope.data : envelope) as T
 }
 
 export class ApiError extends Error {
@@ -149,8 +210,10 @@ function isDemoToken(t: string | null) {
 }
 
 export const authApi = {
-  register: (data: { email: string; first_name: string; last_name: string; password: string; password_confirm: string }) =>
-    api.post<AuthResponse>('/api/auth/register/', data),
+  register: async (data: { email: string; first_name: string; last_name: string; password: string; password_confirm: string }) => {
+    const res = await api.post<unknown>('/api/auth/register/', data)
+    return normalizeAuthResponse(res)
+  },
 
   login: async (data: { email: string; password: string }): Promise<AuthResponse> => {
     // Demo bypass — no backend needed
@@ -160,13 +223,15 @@ export const authApi = {
         tokens: { access: DEMO_TOKEN, refresh: DEMO_REFRESH },
       }
     }
-    return api.post<AuthResponse>('/api/auth/login/', data)
+    const res = await api.post<unknown>('/api/auth/login/', data)
+    return normalizeAuthResponse(res)
   },
 
   me: async (): Promise<User> => {
     // If the stored token is the demo token, return demo user without hitting the API
     if (isDemoToken(tokens.getAccess())) return DEMO_USER
-    return api.get<User>('/api/auth/me/')
+    const res = await api.get<unknown>('/api/auth/me/')
+    return normalizeUser(res)
   },
 }
 
@@ -250,14 +315,50 @@ export type QuestionResult = {
 }
 
 export const interviewApi = {
-  list:          ()                                                          => api.get<InterviewSession[]>('/api/interviews/'),
-  create:        (data: { role: string; experience_level: string; difficulty: string; skills: string[] }) =>
-                   api.post<InterviewSession>('/api/interviews/', data),
-  detail:        (id: number)                                               => api.get<InterviewSessionDetail>(`/api/interviews/${id}/`),
-  results:       (id: number)                                               => api.get<InterviewResults>(`/api/interviews/${id}/results/`),
-  listQuestions: (id: number)                                               => api.get<Question[]>(`/api/interviews/${id}/questions/`),
-  addQuestion:   (id: number, data: { text: string; question_type: string; expected_answer?: string; order?: number }) =>
-                   api.post<Question>(`/api/interviews/${id}/questions/`, data),
-  submitAnswer:  (questionId: number, data: { answer_text: string; time_taken_seconds?: number }) =>
-                   api.post<UserAnswer>(`/api/interviews/questions/${questionId}/answer/`, data),
+  list: async () => {
+    const data = await api.get<unknown>('/api/interviews/')
+    return asList<InterviewSession>(data)
+  },
+
+  create: async (data: {
+    role: string
+    experience_level: string
+    difficulty: string
+    skills: string[]
+    notes?: string
+  }) => {
+    const res = await api.post<unknown>('/api/interviews/', data)
+    return asObject<InterviewSession>(res, ['session', 'interview'])
+  },
+
+  generateQuestions: async (sessionId: number, questionCount?: number) => {
+    const body = questionCount !== undefined ? { question_count: questionCount } : undefined
+    const data = await api.post<unknown>(`/api/interviews/${sessionId}/questions/generate/`, body)
+    return asList<Question>(data)
+  },
+
+  detail: async (id: number) => {
+    const res = await api.get<unknown>(`/api/interviews/${id}/`)
+    return asObject<InterviewSessionDetail>(res, ['session', 'interview'])
+  },
+
+  results: async (id: number) => {
+    const res = await api.get<unknown>(`/api/interviews/${id}/results/`)
+    return asObject<InterviewResults>(res, ['results', 'session'])
+  },
+
+  listQuestions: async (id: number) => {
+    const data = await api.get<unknown>(`/api/interviews/${id}/questions/`)
+    return asList<Question>(data)
+  },
+
+  addQuestion: async (id: number, data: { text: string; question_type: string; expected_answer?: string; order?: number }) => {
+    const res = await api.post<unknown>(`/api/interviews/${id}/questions/`, data)
+    return asObject<Question>(res, ['question'])
+  },
+
+  submitAnswer: async (questionId: number, data: { answer_text: string; time_taken_seconds?: number }) => {
+    const res = await api.post<unknown>(`/api/interviews/questions/${questionId}/answer/`, data)
+    return asObject<UserAnswer>(res, ['answer', 'user_answer'])
+  },
 }

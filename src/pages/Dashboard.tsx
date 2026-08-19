@@ -101,7 +101,7 @@ export default function Dashboard() {
           </div>
 
           <Btn variant="ghost" style={{ position: 'relative', zIndex: 1 }}
-            onClick={() => navigate('/interview', { state: { sessionId: inProgress.id } })}>
+            onClick={() => navigate(`/interviews/${inProgress.id}`)}>
             Resume →
           </Btn>
         </div>

@@ -26,7 +26,8 @@ function Layout() {
         {/* Protected routes */}
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/create"    element={<ProtectedRoute><CreateSession /></ProtectedRoute>} />
-        <Route path="/interview" element={<ProtectedRoute><Interview /></ProtectedRoute>} />
+        <Route path="/interviews/:id" element={<ProtectedRoute><Interview /></ProtectedRoute>} />
+        <Route path="/interview"     element={<ProtectedRoute><Interview /></ProtectedRoute>} />
         <Route path="/results"   element={<ProtectedRoute><Results /></ProtectedRoute>} />
 
         {/* Catch-all */}

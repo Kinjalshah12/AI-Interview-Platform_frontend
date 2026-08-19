@@ -80,6 +80,7 @@ export default function Topbar() {
         }}>
           {TABS.map(tab => {
             const active = pathname === tab.path
+              || (tab.path === '/interview' && pathname.startsWith('/interviews/'))
             return (
               <button
                 key={tab.path}

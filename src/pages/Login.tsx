@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { authApi, ApiError } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
@@ -21,9 +21,13 @@ export default function Login() {
     setLoading(true)
     try {
       const res = await authApi.login({ email, password })
+
+      if (!res.user || !res.tokens) throw new Error('Invalid response')
+
       login(res.user, res.tokens.access, res.tokens.refresh)
       navigate(from, { replace: true })
     } catch (err) {
+      console.log(err)
       setError(err instanceof ApiError ? err.message : 'Something went wrong.')
     } finally {
       setLoading(false)

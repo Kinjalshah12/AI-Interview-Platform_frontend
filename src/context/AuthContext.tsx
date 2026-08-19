@@ -23,6 +23,8 @@ interface AuthContextValue {
   logout: () => void
 }
 
+
+
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
